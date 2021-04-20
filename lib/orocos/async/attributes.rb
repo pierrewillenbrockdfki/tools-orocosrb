@@ -17,25 +17,26 @@ module Orocos::Async::CORBA
             disable_emitting do
                 reachable!(attribute)
             end
-            @poll_timer = @event_loop.async_every(method(:raw_read), {:period => period, :start => false,
-                                                  :known_errors => Orocos::Async::KNOWN_ERRORS}) do |data,error|
+
+            @poll_timer = @event_loop.async_every(
+                proc { @delegator_obj.raw_read },
+                { period: period, start: false,
+                  known_errors: Orocos::Async::KNOWN_ERRORS }
+            ) do |data, error|
                 if error
                     @poll_timer.cancel
                     self.period = @poll_timer.period
-                    @event_loop.once do
-                        event :error,error
-                    end
-                else
-                    if data
-                        if @raw_last_sample != data
-                            @raw_last_sample = data
-                            event :raw_change,data
-                            event :change,Typelib.to_ruby(data)
-                        end
+                    event :error, error
+                elsif data
+                    if @raw_last_sample != data
+                        @raw_last_sample = data
+                        event :raw_change, data
+                        event :change, Typelib.to_ruby(data)
                     end
                 end
             end
             @poll_timer.doc = attribute.full_name
+
             @task.on_unreachable do
                 unreachable!
             end
@@ -92,14 +93,10 @@ module Orocos::Async::CORBA
         def really_add_listener(listener)
             super
             if listener.event == :raw_change
-                if !@poll_timer.running?
-                    @poll_timer.start(period)
-                end
+                @poll_timer.start(period) unless @poll_timer.running?
                 listener.call(@raw_last_sample) if @raw_last_sample && listener.use_last_value?
             elsif listener.event == :change
-                if !@poll_timer.running?
-                    @poll_timer.start(period)
-                end
+                @poll_timer.start(period) unless @poll_timer.running?
                 listener.call(Typelib.to_ruby(@raw_last_sample)) if @raw_last_sample && listener.use_last_value?
             end
         end

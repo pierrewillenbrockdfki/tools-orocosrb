@@ -1,6 +1,8 @@
 
 module Orocos::Async::CORBA
     class TaskContext < Orocos::Async::TaskContextBase
+        attr_reader :ior
+
         # A TaskContext
         #
         # If not specified the default option settings are:
@@ -25,23 +27,19 @@ module Orocos::Async::CORBA
         # @overload initialize(options)
         # @overload initialize(task,options)
         #       @option options [#ior,#name] :task a task context.
-        def initialize(ior,options=Hash.new)
-            if ior.respond_to?(:ior)
-                ior = ior.ior
-            end
-            ior,options = if ior.is_a? Hash
-                              [nil,ior]
-                          else
-                              [ior,options]
-                          end
-            ior ||= if options.has_key? :ior
-                        options[:ior]
-                    elsif options.has_key? :use
-                        options[:use].ior
-                    end
+        def initialize(ior, options = {})
+            ior = ior.ior if ior.respond_to?(:ior)
+            ior, options =
+                if ior.kind_of?(Hash)
+                    [nil, ior]
+                else
+                    [ior, options]
+                end
+
+            ior ||= options[:ior] || options[:use]&.ior
             name = options[:name] || ior
-            super(name,options.merge(:ior => ior))
             @ior = ior.to_str
+            super(name, options.merge(ior: ior))
         end
 
         def really_add_listener(listener)
@@ -51,16 +49,8 @@ module Orocos::Async::CORBA
             # to prevent different behaviors depending on
             # the calling order
             if listener.use_last_value? && listener.event == :state_change
-                state = @mutex.synchronize do
-                    @delegator_obj.current_state if valid_delegator?
-                end
-                event_loop.once{listener.call state} if state
-            end
-        end
-
-        def ior
-            @mutex.synchronize do
-                @ior.dup if @ior
+                state = @delegator_obj.current_state if valid_delegator?
+                event_loop.once{listener.call(state)} if state
             end
         end
 
@@ -69,9 +59,7 @@ module Orocos::Async::CORBA
         # @option options [String] name the task name
         # @option options [String] ior the task IOR
         def configure_delegation(options = Hash.new)
-            options = Kernel.validate_options options,
-                :name=> nil,
-                :ior => nil
+            options = Kernel.validate_options options, name: nil, ior: nil
 
             ior = options[:ior]
             @ior,@name = if valid_delegator?
@@ -82,9 +70,7 @@ module Orocos::Async::CORBA
                              [ior, @name]
                          end
 
-            if !@ior
-                raise ArgumentError, "no IOR or task has been given"
-            end
+            raise ArgumentError, "no IOR or task has been given" unless @ior
         end
 
         def respond_to_missing?(method_name, include_private = false)
@@ -105,7 +91,9 @@ module Orocos::Async::CORBA
 
         # Called by #task_context to create the underlying task context object
         def access_remote_task_context
-            Orocos::TaskContext.new @ior ,:name => @name
+            task = Orocos::TaskContext.new(@ior, name: @name)
+            name = @name || task.name
+            [task, name]
         end
 
         # add methods which forward the call to the underlying task context

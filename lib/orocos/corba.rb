@@ -117,9 +117,9 @@ module Orocos
 
         rescue ComError => e
             if !obj1
-                raise ComError, "Communication failed with corba #{obj0}", e.backtrace
+                raise ComError, "Communication failed with corba #{obj0} - #{e}", e.backtrace
             else
-                raise ComError, "communication failed with either #{obj0} or #{obj1}", e.backtrace
+                raise ComError, "communication failed with either #{obj0} or #{obj1} - #{e}", e.backtrace
             end
         end
     end

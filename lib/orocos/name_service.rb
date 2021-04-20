@@ -416,7 +416,7 @@ module Orocos
 
             # Returns an Async object that maps to this name service
             def to_async(options = Hash.new)
-                Orocos::Async::Local::NameService.new(:tasks => registered_tasks)
+                Orocos::Async::NameService.new(self.class.new(registered_tasks))
             end
 
             #(see NameServiceBase#get)
@@ -575,7 +575,7 @@ module Orocos
             # @param (see Orocos::Async::CORBA::NameService#initialize)
             # @return [Orocos::Async::CORBA::NameService]
             def to_async(reconnect: true)
-                Orocos::Async::CORBA::NameService.new(ip, reconnect: reconnect)
+                Orocos::Async::NameService.new(self.class.new(ip))
             end
 
             # Resets the CORBA name service client.

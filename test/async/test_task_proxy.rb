@@ -22,9 +22,9 @@ describe Orocos::Async::PortProxy do
             t1 = Orocos::Async.proxy("simple_source_source")
             p = t1.port("cycle")
             sub_port = p.sub_port(:frame)
-            sub_port.must_be_instance_of Orocos::Async::PortProxy
-            sub_port = p.sub_port([:frame,:size])
-            sub_port.must_be_instance_of Orocos::Async::PortProxy
+            assert_kind_of Orocos::Async::SubPortProxy, sub_port
+            sub_port = p.sub_port(%I[frame size])
+            assert_kind_of Orocos::Async::SubPortProxy, sub_port
         end
     end
 
@@ -32,7 +32,7 @@ describe Orocos::Async::PortProxy do
         it "should raise RuntimeError if an operation is performed which is not available for this port type" do
             Orocos.run('simple_sink') do
                 t1 = Orocos::Async.proxy("simple_sink_sink")
-                p = t1.port("cycle",:wait => true)
+                p = t1.port("cycle", wait: true)
                 assert_raises RuntimeError do
                     p.period = 1
                 end
@@ -46,12 +46,19 @@ describe Orocos::Async::PortProxy do
         it "should return the type name of the port if known or connected" do
             t1 = Orocos::Async.proxy("simple_source_source",:retry_period => 0.2,:period => 0.2)
             p = t1.port("cycle2",:type => Integer)
-            assert_equal "Fixnum",p.type_name
+            expected =
+                if Fixnum == Integer
+                    "Integer"
+                else
+                    "Fixnum"
+                end
+
+            assert_equal expected, p.type_name
 
             p2 = t1.port("cycle")
             Orocos.run('simple_source') do
                 p2.wait
-                assert_equal "Fixnum",p.type_name
+                assert_equal Fixnum.to_s, p.type_name
             end
         end
 
@@ -131,7 +138,7 @@ describe Orocos::Async::SubPortProxy do
                 t1.configure
                 t1.start
                 wait_for { data }
-                data.must_be_instance_of Fixnum
+                assert_kind_of Fixnum, data
             end
         end
     end
@@ -142,7 +149,7 @@ describe Orocos::Async::PropertyProxy do
 
     describe "on_reachable" do
         it "must be called once when a prop gets reachable" do
-            prop = Orocos::Async.proxy("process_Test",:period => 0.09).property("prop1")
+            prop = Orocos::Async.proxy("process_Test", period: 0.09).property("prop1")
             counter = 0
             prop.on_reachable do
                 counter +=1
@@ -160,16 +167,17 @@ describe Orocos::Async::PropertyProxy do
             prop = Orocos::Async.proxy("process_Test",:period => 0.09).property("prop1")
             counter = 0
             prop.on_unreachable do
-                counter +=1
+                counter += 1
             end
-            Orocos::Async.steps
-            assert_equal 1,counter
+            wait_for { !prop.valid_delegator? }
+            assert_equal 1, counter
 
-            Orocos.run('process') do
+            Orocos.run("process") do
                 prop.wait
+                wait_for { prop.valid_delegator? }
+                assert prop.valid_delegator?
             end
-            Orocos::Async.steps
-            assert_equal 2,counter
+            wait_for { counter == 2 }
         end
     end
 end
@@ -244,27 +252,25 @@ describe Orocos::Async::AttributeProxy do
         end
 
         it "should reconnect" do
-            t1 = Orocos::Async.proxy("process_Test",:retry_period => 0.09)
+            t1 = Orocos::Async.proxy("process_Test", retry_period: 0.09)
             p = t1.attribute("att2")
-            vals = Array.new
+            vals = []
             p.on_change do |data|
                 vals << data
             end
 
-            Orocos.run('process') do
-                Orocos::Async.steps
-                assert p.reachable?
-            end
-            assert_equal 1,vals.size
-
-            wait_for do
-                !t1.reachable? && !p.reachable?
+            Orocos.run("process") do
+                wait_for { p.valid_delegator? }
+                wait_for { vals.size == 1 }
             end
 
-            Orocos.run('process') do
-                Orocos::Async.steps
+            wait_for { !t1.valid_delegator? }
+            refute p.valid_delegator?
+
+            Orocos.run("process") do
+                wait_for { p.valid_delegator? }
+                wait_for { vals.size == 2 }
             end
-            assert_equal 2,vals.size
         end
     end
 end
@@ -333,9 +339,10 @@ describe Orocos::Async::PropertyProxy do
             end
 
             Orocos.run('process') do
-                wait_for { vals.size == 1 }
+                wait_for { vals.size >= 1 }
             end
             Orocos::Async.steps
+
             Orocos.run('process') do
                 wait_for { vals.size == 2 }
             end
@@ -381,13 +388,13 @@ describe Orocos::Async::TaskContextProxy do
 
         it "shortcut must return TaskContexProxy" do
             t1 = Orocos::Async.proxy("process_Test",:retry_period => 0.1,:period => 0.1)
-            t1.must_be_instance_of Orocos::Async::TaskContextProxy
+            assert_kind_of Orocos::Async::TaskContextProxy, t1
         end
 
         it "should return a port proxy" do
             t1 = Orocos::Async.proxy("process_Test",:retry_period => 0.1,:period => 0.1)
             p = t1.port("test")
-            p.must_be_instance_of Orocos::Async::PortProxy
+            assert_kind_of Orocos::Async::PortProxy, p
         end
 
         it "should connect to a remote task when reachable" do
@@ -407,23 +414,23 @@ describe Orocos::Async::TaskContextProxy do
             Orocos::Async.steps
             assert_equal 1, disconnects # on_unreachable will be called because is not yet reachable
 
-            Orocos.run('process') do
-                Orocos::Async.steps # queue reconnect
-                assert t1.reachable?
-                t1.instance_variable_get(:@delegator_obj).must_be_instance_of Orocos::Async::CORBA::TaskContext
+            Orocos.run("process") do
+                wait_for { t1.reachable? }
+                assert_kind_of Orocos::Async::CORBA::TaskContext,
+                               t1.instance_variable_get(:@delegator_obj)
                 assert_equal 1, disconnects
             end
-            assert !t1.reachable?
+            refute t1.reachable?
             Orocos::Async.steps # queue reconnect
             assert_equal 1, connects
             assert_equal 2, disconnects
 
-            Orocos.run('process') do
+            Orocos.run("process") do
                 Orocos::Async.steps # queue reconnect
                 assert t1.reachable?
             end
             Orocos::Async.steps # queue reconnect
-            assert !t1.reachable?
+            refute t1.reachable?
             assert_equal 2, connects
             assert_equal 3, disconnects
         end

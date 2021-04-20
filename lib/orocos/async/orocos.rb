@@ -79,12 +79,12 @@ module Orocos
         def to_async(options = Hash.new)
             options[:name] ||= name
             options[:ior] ||= ior
-            Orocos::Async::CORBA::TaskContext.new(options)
+            Orocos::Async::CORBA::TaskContext.new(options.merge(use: self))
         end
 
         def to_proxy(options = Hash.new)
             options[:use] ||= to_async
-            # use name service to check if there is already 
+            # use name service to check if there is already
             # a proxy for the task
             Orocos::Async.proxy(name,options)
         end

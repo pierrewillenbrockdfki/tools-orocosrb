@@ -4,6 +4,8 @@ module Orocos::Async
         extend Orocos::Async::ObjectBase::Periodic::ClassMethods
         include Orocos::Async::ObjectBase::Periodic
 
+        attr_reader :name
+
         self.default_period = 1.0
 
         define_events :port_reachable,
@@ -22,7 +24,7 @@ module Orocos::Async
             begin
                 t = Orocos::CORBA.name_service.get(task.basename)
                 raise "Cannot create ruby task for #{task.name} "\
-                    "because there is already a task #{t.name} "\
+                    "because is already a task #{t.name} "\
                     "registered on the main CORBA name service."
             rescue Orocos::NotFound
             end
@@ -57,36 +59,77 @@ module Orocos::Async
         #   returned by the method
         attr_predicate :raise_on_access_error?, true
 
-        def initialize(name,options=Hash.new)
-            event_loop,reachable_options = Kernel.filter_options options,:event_loop => Orocos::Async.event_loop
-            super(name,event_loop[:event_loop])
-            @mutex = Mutex.new
+        def initialize(name, options = {})
+            self_options, reachable_options =
+                Kernel.filter_options(
+                    options,
+                    { event_loop: Orocos::Async.event_loop, wait: true }
+                )
+            super(name, self_options[:event_loop])
+
             @last_state = nil
-            @port_names = Array.new
-            @property_names = Array.new
-            @attribute_names = Array.new
+            @port_names = []
+            @property_names = []
+            @attribute_names = []
 
-            watchdog_proc = Proc.new do
-                ping # call a method which raises ComError if the connection died
-                # this is used to disconnect the task by an error handler
-                [states,port_names,property_names,attribute_names]
-            end
+            @ready = false
+            ready = []
+            resolution_in_progress = {}
+            @watchdog_timer =
+                @event_loop.every(default_period, false) do
+                    %I[states port_names property_names attribute_names].each do |type|
+                        next if resolution_in_progress[type]
 
-            @watchdog_timer = @event_loop.async_every(watchdog_proc,{:period => default_period,
-                                                      :default => [[],[],[],[]],
-                                                      :start => false,
-                                                      :sync_key => nil, #is blocked by the methods call ping, states, etc
-                                                      :known_errors => Orocos::Async::KNOWN_ERRORS}) do |data,error|
-                                                            process_states(data[0])
-                                                            process_port_names(data[1])
-                                                            process_property_names(data[2])
-                                                            process_attribute_names(data[3])
-                                                      end
+                        send(type) do |result, _|
+                            if result
+                                send("process_#{type}", result)
+                                (ready << type).uniq!
+                                @ready = ready.size == 4
+                            end
+                            resolution_in_progress[type] = false
+                        end
+                        resolution_in_progress[type] = true
+                    end
+                end
             @watchdog_timer.doc = name
-            reachable!(reachable_options)
+
+            if reachable_options[:use]
+                reachable!(reachable_options)
+            elsif self_options[:wait]
+                begin
+                    resolved_task_context(access_remote_task_context,
+                                          nil, reachable_options)
+                rescue *Orocos::Async::KNOWN_ERRORS => e # Lint:
+                    resolved_task_context(nil, e, reachable_options)
+                end
+            else
+                @event_loop.defer(
+                    callback: proc { |t, e| resolved_task_context(t, e, reachable_options) },
+                    known_errors: Orocos::Async::KNOWN_ERRORS
+                ) do
+                    access_remote_task_context
+                end
+            end
         end
 
-        def to_async(options=Hash.new)
+        def wait(timeout = 5)
+            super
+            @event_loop.wait_for(timeout) { @ready }
+        end
+
+        def resolved_task_context(result, error, reachable_options)
+            if error
+                @access_error = error
+                invalidate_delegator!
+                raise error if raise_on_access_error?
+            else
+                task_context, name = *result
+                @name = name if name
+                reachable!(reachable_options.merge(use: task_context))
+            end
+        end
+
+        def to_async(_options = {})
             self
         end
 
@@ -112,7 +155,7 @@ module Orocos::Async
             !!@ruby_task_context
         end
 
-        def really_add_listener(listener)
+        main_thread_call def really_add_listener(listener)
             return super unless listener.use_last_value?
 
             # call new listeners with the current value
@@ -120,7 +163,7 @@ module Orocos::Async
             # the calling order
             if listener.event == :port_reachable
                 names = @port_names.dup
-                event_loop.once do 
+                event_loop.once do
                     names.each do |name|
                         listener.call name
                     end
@@ -143,12 +186,6 @@ module Orocos::Async
             super
         end
 
-        def name
-            @mutex.synchronize do
-                @name.dup if @name
-            end
-        end
-
         # Initiates the binding of the underlying sychronous access object to
         # this async object.
         #
@@ -167,84 +204,70 @@ module Orocos::Async
         # @option options [Boolean] raise (false) if set, the #task_context
         #   method will raise if the task context cannot be accessed on first
         #   try. Otherwise, it will try to access it forever until it finds it.
-        def reachable!(options = Hash.new)
-            @mutex.synchronize do
-                options, configure_options = Kernel.filter_options options,
-                    :watchdog => true,
-                    :period => default_period,
-                    :wait => false,
-                    :use => nil,
-                    :raise => false
+        main_thread_call def reachable!(options = {})
+            options, configure_options = Kernel.filter_options(
+                options,
+                {
+                    watchdog: true,
+                    period: default_period,
+                    wait: false,
+                    use: nil,
+                    raise: false
+                }
+            )
 
-                self.raise_on_access_error = options[:raise]
+            self.raise_on_access_error = options[:raise]
 
-                if options[:use]
-                    @delegator_obj = options[:use]
-                    @watchdog_timer.doc = @delegator_obj.name
-                else
-                    invalidate_delegator!
-                end
-
-                configure_delegation(configure_options)
-
-                @watchdog_timer.start(options[:period],false) if options[:watchdog]
-                @event_loop.async(method(:task_context))
+            if options[:use]
+                @delegator_obj = options[:use]
+                @watchdog_timer.doc = @delegator_obj.name
+            else
+                invalidate_delegator!
             end
-            wait if options[:wait]
+
+            configure_delegation(configure_options)
+            @watchdog_timer.start(options[:period], false) if options[:watchdog]
         end
 
         # Called by #reachable! to do subclass-specific configuration
         #
         # @param [Hash] configure_options all options passed to #reachable! that
         #   are not understood by #reachable!
-        def configure_delegation(configure_options = Hash.new)
-        end
+        main_thread_call def configure_delegation(configure_options = {}); end
 
         # Disconnectes self from the remote task context and returns its underlying
         # object used to communicate with the remote task (designated object).
-        # 
+        #
         # Returns nil if the TaskContext is not connected.
         # Returns an EventLoop Event if not called from the event loop thread.
         #
         # @param [Exception] reason The reason for the disconnect
         # @return [Orocos::TaskContext,nil,Utilrb::EventLoop::Event]
-        def unreachable!(options = Hash.new)
+        main_thread_call def unreachable!(options = {})
             options = Kernel.validate_options options, :error
+
             # ensure that this is always called from the
             # event loop thread
-            @event_loop.call do
-                old_task = @mutex.synchronize do
-                    if valid_delegator?
-                        @access_error = options.delete(:error) ||
-                            ArgumentError.new("cannot access the remote task context for an unknown reason")
-                        task = @delegator_obj
-                        invalidate_delegator!
-                        @watchdog_timer.cancel if @watchdog_timer
-                        task
-                    end
-                end
-                clear_interface
-                event :unreachable if old_task
-                old_task
+            if valid_delegator?
+                @access_error =
+                    options.delete(:error) ||
+                    ArgumentError.new("could not access the remote task context "\
+                                      "for an unknown reason")
+
+                old_task = @delegator_obj
+                invalidate_delegator!
+                @watchdog_timer.cancel if @watchdog_timer
             end
+
+            clear_interface
+            event :unreachable if old_task
+            old_task
         end
 
-        def clear_interface
+        main_thread_call def clear_interface
             process_port_names
             process_attribute_names
             process_property_names
-        end
-
-        def reachable?(&block)
-            if block
-                ping(&block)
-            else
-                ping
-            end
-            true
-        rescue Orocos::NotFound,Orocos::ComError => e
-            unreachable!(:error => e)
-            false
         end
 
         # Helper method to setup async calls
@@ -270,12 +293,12 @@ module Orocos::Async
         #
         # @return [Object] in the synchronous case, the method returns the
         #   underlying method's return value. In the asynchronous case TODO
-        def call_with_async(method_name,user_callback,to_async_options,*args)
-            p = proc do |object,error|
-                async_object = object.to_async(Hash[:use => self].merge(to_async_options))
+        def call_with_async(method_name, user_callback, to_async_options, *args)
+            p = proc do |object, error|
+                async_object = object&.to_async({ use: self }.merge(to_async_options))
                 if user_callback
                     if user_callback.arity == 2
-                        user_callback.call(async_object,error)
+                        user_callback.call(async_object, error)
                     else
                         user_callback.call(async_object)
                     end
@@ -284,67 +307,58 @@ module Orocos::Async
                 end
             end
             if user_callback
-                send(method_name,*args,&p)
+                send(method_name, *args, &p)
             else
-                async_object = send(method_name,*args)
-                p.call async_object,nil
+                async_object = send(method_name, *args)
+                p.call async_object, nil
             end
         end
 
-        def attribute(name,options = Hash.new,&block)
+        main_thread_call def attribute(name,options = Hash.new,&block)
             call_with_async(:orig_attribute,block,options,name)
         end
 
-        def property(name,options = Hash.new,&block)
+        main_thread_call def property(name,options = Hash.new,&block)
             call_with_async(:orig_property,block,options,name)
         end
 
-        def port(name, verify = true,options=Hash.new, &block)
+        main_thread_call def port(name, verify = true,options=Hash.new, &block)
             call_with_async(:orig_port,block,options,name,verify)
         end
 
         # call-seq:
         #  task.each_property { |a| ... } => task
-        # 
+        #
         # Enumerates the properties that are available on
         # this task, as instances of Orocos::Attribute
-        def each_property(&block)
-            if !block_given?
-                return enum_for(:each_property)
-            end
-            property_names.each do |name|
-                yield(property(name))
-            end
+        main_thread_call def each_property
+            return enum_for(__method__) unless block_given?
+
+            property_names.each { |name| yield(property(name)) }
             self
         end
 
         # call-seq:
         #  task.each_attribute { |a| ... } => task
-        # 
+        #
         # Enumerates the attributes that are available on
         # this task, as instances of Orocos::Attribute
-        def each_attribute(&block)
-            if !block_given?
-                return enum_for(:each_attribute)
-            end
-            attribute_names.each do |name|
-                yield(attribute(name))
-            end
+        def each_attribute
+            return enum_for(__method__) unless block_given?
+
+            attribute_names.each { |name| yield(attribute(name)) }
             self
         end
 
         # call-seq:
         #  task.each_port { |p| ... } => task
-        # 
+        #
         # Enumerates the ports that are available on this task, as instances of
         # either Orocos::InputPort or Orocos::OutputPort
-        def each_port(&block)
-            if !block_given?
-                return enum_for(:each_port)
-            end
-            port_names.each do |name|
-                yield(port(name))
-            end
+        def each_port
+            return enum_for(__method__) unless block_given?
+
+            port_names.each { |name| yield(port(name)) }
             self
         end
 
@@ -366,25 +380,28 @@ module Orocos::Async
             def_delegators methods
         end
 
+        main_thread_call :orig_port
+        main_thread_call :orig_property
+        main_thread_call :orig_attribute
+
         # must be called from the event loop thread
-        def process_states(states=[])
-            if !states.empty?
-                # We don't use #event here. The callbacks, when using #event,
-                # would be called delayed and therefore task.state would not be
-                # equal to the state passed to the callback
-                blocks = listeners :state_change
-                states.each do |s|
-                    next if @last_state == s
-                    @last_state = s
-                    blocks.each do |b|
-                        b.call(s)
-                    end
+        main_thread_call def process_states(states = [])
+            # We don't use #event here. The callbacks, when using #event, would
+            # be called delayed and therefore task.state would not be equal to
+            # the state passed to the callback
+            blocks = listeners :state_change
+            states.each do |s|
+                next if @last_state == s
+
+                @last_state = s
+                blocks.each do |b|
+                    b.call(s)
                 end
             end
         end
 
         # must be called from the event loop thread
-        def process_port_names(port_names=[])
+        main_thread_call def process_port_names(port_names = [])
             added_ports = port_names - @port_names
             deleted_ports = @port_names - port_names
             deleted_ports.each do |name|
@@ -398,7 +415,7 @@ module Orocos::Async
         end
 
         # must be called from the event loop thread
-        def process_property_names(property_names=[])
+        main_thread_call def process_property_names(property_names=[])
             added_properties = property_names - @property_names
             deleted_properties = @property_names - property_names
             deleted_properties.each do |name|
@@ -412,7 +429,7 @@ module Orocos::Async
         end
 
         # must be called from the event loop thread
-        def process_attribute_names(attribute_names=[])
+        main_thread_call def process_attribute_names(attribute_names=[])
             added_properties = attribute_names - @attribute_names
             deleted_properties = @attribute_names - attribute_names
             deleted_properties.each do |name|
@@ -430,39 +447,10 @@ module Orocos::Async
         # the @delegator_obj instance variable must not be directly accessed
         # without proper synchronization.
         def task_context
-            @mutex.synchronize do
-                begin
-                    task = if valid_delegator?
-                               @delegator_obj
-                           elsif @access_error # do not try again
-                               raise @access_error
-                           else
-                               obj = access_remote_task_context
-                               @name = obj.name
-                               @watchdog_timer.doc = @name
-                               port_names = obj.port_names
-                               property_names = obj.property_names
-                               attribute_names = obj.attribute_names
-                               state = obj.state
-                               @event_loop.once do
-                                   process_states([state])
-                                   process_port_names(port_names)
-                                   process_property_names(property_names)
-                                   process_attribute_names(attribute_names)
-                               end
-                               @delegator_obj = obj
-                               event :reachable
-                               obj
-                           end
-                    [task,nil]
-                rescue Exception => e
-                    @access_error = e
-                    invalidate_delegator!
-                    raise e if raise_on_access_error?   # do not be silent if
-                    [nil,@access_error]
-                end
-            end
+            return [@delegator_obj, nil] if valid_delegator?
+            raise @access_error if @access_error # do not try again
+
+            [nil, Orocos::ComError.new("accessing async task context before it is ready")]
         end
     end
 end
-

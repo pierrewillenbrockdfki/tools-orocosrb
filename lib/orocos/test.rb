@@ -189,8 +189,18 @@ module Orocos
             flunk("#{task} was expected to be in state #{state} but is in #{task.state}")
         end
 
-        def wait_for(timeout = 5, &block)
+        def wait_for(timeout = 5, msg = nil, &block)
             Orocos::Async.wait_for(0.005, timeout, &block)
+        rescue Utilrb::EventLoop::WaitForTimeout
+            raise unless msg
+
+            msg = msg.call if msg.respond_to?(:call)
+            raise Utilrb::EventLoop::WaitForTimeout, "timed out waiting for #{msg}"
+        end
+
+        def wait_for_equality(expected, value, timeout: 5)
+            msg = proc { "#{value} to equal #{expected}" }
+            wait_for(timeout, msg) { expected == value }
         end
 
         def name_service

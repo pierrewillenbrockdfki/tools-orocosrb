@@ -297,7 +297,7 @@ module Orocos
             self.name_service << Orocos::ROS.name_service
         end
         if defined?(Orocos::Async)
-            Orocos.name_service.name_services.each do |ns|
+            Orocos.name_service.each do |ns|
                 Orocos::Async.name_service.add(ns)
             end
         end

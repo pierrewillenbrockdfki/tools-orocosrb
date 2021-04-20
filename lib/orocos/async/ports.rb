@@ -361,7 +361,7 @@ module Orocos::Async::CORBA
 
         def remove_listener(listener)
             super
-            if number_of_listeners(:data) == 0  && number_of_listeners(:raw_data) == 0 && @global_reader
+            if number_of_listeners(:data) == 0  && number_of_listeners(:raw_data) == 0 && @global_reader&.valid_delegator?
                 remove_proxy_event(@global_reader)
                 @global_reader.disconnect{} # call it asynchron
                 @global_reader = nil

@@ -38,7 +38,8 @@ module Orocos
                 end
 
                 def access_remote_task_context
-                    Orocos::ROS::Node.new(@name_service, @server, @name)
+                    node = Orocos::ROS::Node.new(@name_service, @server, @name)
+                    [node, name]
                 end
 
                 # add methods which forward the call to the underlying task context

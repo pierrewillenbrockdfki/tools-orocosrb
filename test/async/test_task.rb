@@ -2,19 +2,18 @@ require 'orocos/test'
 require 'orocos/async'
 
 describe Orocos::Async::CORBA::TaskContext do
-    before do 
+    before do
         Orocos::Async.clear
     end
 
-    describe "initialize" do 
-        before do 
+    describe "initialize" do
+        before do
             Orocos::Async.clear
         end
 
         it "should raise ComError if remote task is not reachable and :raise is set to true" do
-            
             Orocos::CORBA.connect_timeout = 50
-            t1 = Orocos::Async::CORBA::TaskContext.new(:ior => ior("bla"),:raise => true)
+            Orocos::Async::CORBA::TaskContext.new(ior: ior("bla"), raise: true)
             sleep 0.1
             assert_raises(Orocos::CORBA::ComError) do
                 Orocos::Async.step
@@ -45,46 +44,46 @@ describe Orocos::Async::CORBA::TaskContext do
         end
 
         it "can be initialized from ior" do
-            Orocos.run('process') do
-                ior = Orocos.name_service.ior('process_Test')
-                t1 = Orocos::Async::CORBA::TaskContext.new(:ior => ior)
-                assert t1.reachable?
-                t1 = Orocos::Async::CORBA::TaskContext.new(ior)
-                assert t1.reachable?
-                Orocos::Async.steps
-            end
+            start "process"
+
+            ior = Orocos.name_service.ior("process_Test")
+            t1 = Orocos::Async::CORBA::TaskContext.new(ior: ior)
+            wait_for { t1.reachable? }
+            t1 = Orocos::Async::CORBA::TaskContext.new(ior)
+            wait_for { t1.reachable? }
+            Orocos::Async.steps
         end
 
         it "can be initialized from Orocos::TaskContext" do
-            Orocos.run('process') do
-                t1 = Orocos.name_service.get "process_Test"
-                t2 = Orocos::Async::CORBA::TaskContext.new(t1)
-                assert t2.reachable?
-                t2 = Orocos::Async::CORBA::TaskContext.new(:use => t1)
-                assert t2.reachable?
-                Orocos::Async.steps
-            end
+            start "process"
+
+            t1 = Orocos.name_service.get "process_Test"
+            t2 = Orocos::Async::CORBA::TaskContext.new(t1)
+            wait_for { t2.reachable? }
+            t2 = Orocos::Async::CORBA::TaskContext.new(use: t1)
+            wait_for { t2.reachable? }
+            Orocos::Async.steps
         end
 
         it "can be initialized from Orocos::Async::CORBA::TaskContext" do
-            Orocos.run('process') do
-                t1 = Orocos::Async::CORBA::TaskContext.new(:ior => ior("process_Test"))
-                assert t1.reachable?
-                t2 = Orocos::Async::CORBA::TaskContext.new(t1)
-                assert t2.reachable?
-                Orocos::Async.steps
-            end
+            start "process"
+
+            t1 = Orocos::Async::CORBA::TaskContext.new(ior: ior("process_Test"))
+            wait_for { t1.reachable? }
+            t2 = Orocos::Async::CORBA::TaskContext.new(t1)
+            wait_for { t2.reachable? }
+            Orocos::Async.steps
         end
 
-        it 'should have the instance methods from Orocos::TaskContext' do 
+        it "has the instance methods from Orocos::TaskContext" do
             methods = Orocos::Async::CORBA::TaskContext.instance_methods
             Orocos::TaskContext.instance_methods.each do |method|
-                methods.include?(method).wont_be_nil
+                assert methods.include?(method)
             end
         end
     end
 
-    describe "Async access" do 
+    describe "Async access" do
         it "should raise on all synchronous calls to the remote task if not reachable" do
             t1 = Orocos::Async::CORBA::TaskContext.new(ior('process_Test'))
             t1.reachable?.must_equal false # only function that should never raise
@@ -92,7 +91,7 @@ describe Orocos::Async::CORBA::TaskContext do
             assert_raises Orocos::CORBA::ComError do
                 t1.has_port?("bla").must_equal false
             end
-            assert_raises Orocos::CORBA::ComError do 
+            assert_raises Orocos::CORBA::ComError do
                 t1.has_attribute?("bla").must_equal false
             end
             t1.attribute_names do |names,e|
@@ -107,23 +106,23 @@ describe Orocos::Async::CORBA::TaskContext do
             connect = nil
             disconnect = nil
             t1 = nil
+
             Orocos.run('process') do
-                t1 = Orocos::Async::CORBA::TaskContext.new(ior('process_Test'),:period => 0.1,:watchdog => true)
+                t1 = Orocos::Async::CORBA::TaskContext.new(
+                    ior('process_Test'), period: 0.01, watchdog: true
+                )
                 t1.on_reachable do
                     connect = true
                 end
                 t1.on_unreachable do
                     disconnect = true
                 end
-                Orocos::Async.steps
-                assert connect
+                wait_for { connect }
             end
-            sleep 0.11
-            Orocos::Async.steps
-            assert disconnect
+            wait_for { disconnect }
         end
 
-        it "should call on_port_reachable" do 
+        it "should call on_port_reachable" do
             Orocos.run('simple_source') do
                 t1 = Orocos::Async::CORBA::TaskContext.new(ior('simple_source_source'),:period => 0.1,:watchdog => true)
                 ports = []
@@ -135,7 +134,7 @@ describe Orocos::Async::CORBA::TaskContext do
                 Orocos::Async.step
                 assert_equal ["cycle", "cycle_struct", "out0", "out1", "out2", "out3", "state"],ports.sort
                 ports.clear
-               
+
                 #should be called even if the task is already reachable
                 t1.on_port_reachable do |name|
                     ports << name
@@ -146,7 +145,7 @@ describe Orocos::Async::CORBA::TaskContext do
         end
 
 
-        it "should call on_port_unreachable" do 
+        it "should call on_port_unreachable" do
             t1 = nil
             ports = []
             Orocos.run('simple_source') do
@@ -164,7 +163,7 @@ describe Orocos::Async::CORBA::TaskContext do
             assert_equal ["cycle", "cycle_struct", "out0", "out1", "out2", "out3", "state"],ports.sort
         end
 
-        it "should call on_property_reachable" do 
+        it "should call on_property_reachable" do
             process = start('process::Test' => 'process_Test')
 
             t1 = Orocos::Async::CORBA::TaskContext.new(ior('process_Test'),:period => 0.1,:watchdog => true)
@@ -186,7 +185,7 @@ describe Orocos::Async::CORBA::TaskContext do
             assert_equal ["dynamic_prop","dynamic_prop_setter_called","prop1", "prop2", "prop3"],properties
         end
 
-        it "should call on_port_reachable if a port was dynamically added" do 
+        it "should call on_port_reachable if a port was dynamically added" do
             task = Orocos::RubyTasks::TaskContext.new("test")
             t1 = Orocos::Async::CORBA::TaskContext.new(ior('test'),:period => 0.1,:watchdog => true)
             ports = []
@@ -201,7 +200,7 @@ describe Orocos::Async::CORBA::TaskContext do
             assert_equal ['state', "frame","frame2"], ports
         end
 
-        it "should call on_port_unreachable if a port was dynamically removed" do 
+        it "should call on_port_unreachable if a port was dynamically removed" do
             task = Orocos::RubyTasks::TaskContext.new("test")
             t1 = Orocos::Async::CORBA::TaskContext.new(ior('test'),:period => 0.1,:watchdog => true)
             port = task.create_output_port("frame","string")
@@ -220,7 +219,7 @@ describe Orocos::Async::CORBA::TaskContext do
             Orocos::Async.steps
             assert_equal ["frame"], ports
         end
-        
+
         it "should call on_error" do
             t1 = nil
             error = nil
@@ -263,7 +262,7 @@ describe Orocos::Async::CORBA::TaskContext do
                 Orocos::Async.step
                 t1
             end
-            t1.port_names do 
+            t1.port_names do
             end
             sleep 0.1
             Orocos::Async.steps
@@ -287,7 +286,7 @@ describe Orocos::Async::CORBA::TaskContext do
             end
         end
 
-        it "should return its ports" do 
+        it "should return its ports" do
             Orocos.run('simple_source') do
                 t1 = Orocos::Async::CORBA::TaskContext.new(ior('simple_source_source'))
                 names = t1.port_names
@@ -300,7 +299,7 @@ describe Orocos::Async::CORBA::TaskContext do
             end
         end
 
-        it "should asynchronously return its ports" do 
+        it "should asynchronously return its ports" do
             Orocos.run('simple_source') do
                 t1 = Orocos::Async::CORBA::TaskContext.new(ior('simple_source_source'))
                 queue = Queue.new
@@ -325,7 +324,7 @@ describe Orocos::Async::CORBA::TaskContext do
             Orocos.run('process') do
                 t1 = Orocos::Async::CORBA::TaskContext.new(ior('process_Test'))
                 q = Queue.new
-                0.upto 19 do 
+                0.upto 19 do
                     t1.reachable? do |val|
                         sleep 0.15 # this will ensure that no thread can run twice
                         q << val
@@ -341,7 +340,7 @@ describe Orocos::Async::CORBA::TaskContext do
             Orocos.run('process') do
                 t1 = Orocos::Async::CORBA::TaskContext.new(ior('process_Test'))
                 q = Queue.new
-                0.upto 9 do 
+                0.upto 9 do
                     t1.model do |val|
                         sleep 0.1 # this will ensure that no thread can run twice
                         q << val

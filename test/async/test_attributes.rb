@@ -1,49 +1,38 @@
-require 'orocos/test'
-require 'orocos/async'
+require "orocos/test"
+require "orocos/async"
 
 describe Orocos::Async::CORBA::Property do
-    before do 
+    before do
         Orocos::Async.clear
+        @ns = Orocos::Async::NameService.new
+        @ns << Orocos::CORBA::NameService.new
+
+        start "process"
+        @task = @ns.get("process_Test")
     end
 
-    describe "When connect to a remote task" do 
-        it "must return a property object" do 
-            Orocos.run('process') do
-                t1 = Orocos::Async::CORBA::TaskContext.new(ior('process_Test'))
-                p = t1.property("prop1")
-                p.must_be_kind_of Orocos::Async::CORBA::Property
-            end
+    describe "When connect to a remote task" do
+        it "returns a property synchronously" do
+            p = @task.property("prop1")
+            assert_kind_of Orocos::Async::CORBA::Property, p
         end
-        it "must asynchronously return a property" do 
-            Orocos.run('process') do
-                t1 = Orocos::Async::CORBA::TaskContext.new(ior('process_Test'))
-                p = nil
-                t1.property("prop1") do |prop|
-                    p = prop
-                end
-                sleep 0.1
-                Orocos::Async.step
-                p.must_be_kind_of Orocos::Async::CORBA::Property
-            end
+        it "returns a property asynchronously" do
+            p = nil
+            @task.property("prop1") { |prop| p = prop }
+            wait_for { p }
+            assert_kind_of Orocos::Async::CORBA::Property, p
         end
-        it "must call on_change" do 
-            Orocos.run('process') do
-                t1 = Orocos::Async::CORBA::TaskContext.new(ior('process_Test'))
-                p = t1.property("prop2")
-                p.period = 0.1
-                vals = Array.new
-                p.on_change do |data|
-                    vals << data
-                end
-                sleep 0.1
-                Orocos::Async.steps
-                assert_equal 1,vals.size
-                p.write 33
-                sleep 0.1
-                Orocos::Async.steps
-                assert_equal 2,vals.size
-                assert_equal 33,vals.last
+        it "calls on_change with the property values" do
+            p = @task.property("prop2")
+            p.period = 0.01
+
+            vals = []
+            p.on_change do |data|
+                vals << data
             end
+            wait_for_equality [84], vals
+            p.write 33
+            wait_for_equality [84, 33], vals
         end
     end
 end
@@ -51,48 +40,36 @@ end
 describe Orocos::Async::CORBA::Attribute do
     include Orocos::Spec
 
-    before do 
+    before do
         Orocos::Async.clear
+        @ns = Orocos::Async::NameService.new
+        @ns << Orocos::CORBA::NameService.new
+
+        start "process"
+        @task = @ns.get("process_Test")
     end
 
-    describe "When connect to a remote task" do 
-        it "must return a attribute object" do 
-            Orocos.run('process') do
-                t1 = Orocos::Async::CORBA::TaskContext.new(ior('process_Test'))
-                a = t1.attribute("att2")
-                a.must_be_kind_of Orocos::Async::CORBA::Attribute
-            end
+    describe "When connect to a remote task" do
+        it "returns an attribute object synchronously" do
+            a = @task.attribute("att2")
+            assert_kind_of Orocos::Async::CORBA::Attribute, a
         end
-        it "must asynchronously return a attribute" do 
-            Orocos.run('process') do
-                t1 = Orocos::Async::CORBA::TaskContext.new(ior('process_Test'))
-                a = nil
-                t1.attribute("att2") do |prop|
-                    a = prop
-                end
-                sleep 0.1
-                Orocos::Async.step
-                a.must_be_kind_of Orocos::Async::CORBA::Attribute
-            end
+        it "returns an attribute object asynchronously" do
+            a = nil
+            @task.attribute("att2") { |prop| a = prop }
+            wait_for { a }
+            assert_kind_of Orocos::Async::CORBA::Attribute, a
         end
-        it "must call on_change" do 
-            Orocos.run('process') do
-                t1 = Orocos::Async::CORBA::TaskContext.new(ior('process_Test'))
-                a = t1.attribute("att2")
-                a.period = 0.1
-                vals = Array.new
-                a.on_change do |data|
-                    vals << data
-                end
-                sleep 0.1
-                Orocos::Async.steps
-                assert_equal 1,vals.size
-                a.write 33
-                sleep 0.1
-                Orocos::Async.steps
-                assert_equal 2,vals.size
-                assert_equal 33,vals.last
+        it "calls on_change with the attribute values" do
+            a = @task.attribute("att2")
+            a.period = 0.01
+            vals = []
+            a.on_change do |data|
+                vals << data
             end
+            wait_for_equality [84], vals
+            a.write 33
+            wait_for_equality [84, 33], vals
         end
     end
 end
