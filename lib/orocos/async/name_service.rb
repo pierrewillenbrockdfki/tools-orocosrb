@@ -244,9 +244,9 @@ module Orocos::Async
                             block.call task
                         end
                     end
-                    orig_get name,other_options,&p
+                    orig_get name,**other_options,&p
                 else
-                    task = orig_get name,other_options
+                    task = orig_get name,**other_options
                     task.to_async(async_options)
                 end
             end
@@ -327,9 +327,9 @@ module Orocos::Async
                         block.call atask
                     end
                 end 
-                orig_get name,other_options,&p
+                orig_get name,**other_options,&p
             else
-                task = orig_get name,other_options
+                task = orig_get name,**other_options
                 task.to_async(Hash[:use => task].merge(async_options))
             end
         end
