@@ -14,6 +14,7 @@
 #include "corba.hh"
 #include "rorocos.hh"
 #include "lib/corba_name_service_client.hh"
+#include <ruby/version.h>
 
 using namespace CORBA;
 using namespace std;
@@ -176,7 +177,11 @@ static VALUE name_service_create(int argc, VALUE *argv,VALUE klass)
 
     std::auto_ptr<NameServiceClient> new_name_service(new NameServiceClient(ip,port));
     VALUE obj = simple_wrap(cNameService, new_name_service.release());
+#if RUBY_API_VERSION_CODE >= 20700
+    rb_obj_call_init_kw(obj,argc,argv,RB_PASS_CALLED_KEYWORDS);
+#else
     rb_obj_call_init(obj,argc,argv);
+#endif
     return obj;
 }
 

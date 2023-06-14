@@ -27,6 +27,7 @@
 #include "rorocos.hh"
 #include "corba.hh"
 #include <typelib_ruby.hh>
+#include <ruby/version.h>
 
 using namespace std;
 using namespace boost;
@@ -133,7 +134,11 @@ VALUE task_context_create(int argc, VALUE *argv,VALUE klass)
 
     RTaskContext *context =  corba_blocking_fct_call_with_result(boost::bind(&CorbaAccess::createRTaskContext,CorbaAccess::instance(),ior));
     VALUE obj = simple_wrap(klass, context);
+#if RUBY_API_VERSION_CODE >= 20700
+    rb_obj_call_init_kw(obj,argc,argv,RB_PASS_CALLED_KEYWORDS);
+#else
     rb_obj_call_init(obj,argc,argv);
+#endif
     return obj;
 }
 
