@@ -813,7 +813,7 @@ module Orocos
                     name_mappings.each do |old, new|
                         p.map_name old, new
                     end
-                    p.spawn(spawn_options)
+                    p.spawn(**spawn_options)
                     p
                 end
 

@@ -63,7 +63,7 @@ module Orocos
 
         def ensure_type_available(options = Hash.new)
             if !type || type.null?
-                @type = Orocos.find_type_by_orocos_type_name(orocos_type_name, options)
+                @type = Orocos.find_type_by_orocos_type_name(orocos_type_name, **options)
             end
         end
 
