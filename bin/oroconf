@@ -189,7 +189,7 @@ when "apply"
 
     task = Orocos::TaskContext.get task_name
 
-    if !File.exists?(path)
+    if !File.exist?(path)
         STDERR.puts "no such file or directory #{path}"
     end
     Orocos.apply_conf(task, path, conf_names)
