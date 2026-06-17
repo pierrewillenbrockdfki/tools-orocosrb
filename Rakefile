@@ -77,7 +77,7 @@ Rake::ExtensionTask.new('rorocos') do |ext|
     ext.lib_dir = "lib/orocos"
     ext.source_pattern = "*.{c,cpp,cc}"
 
-    if not Dir.exists?(ext.tmp_dir)
+    if not Dir.exist?(ext.tmp_dir)
         FileUtils.mkdir_p ext.tmp_dir
     end
 end
