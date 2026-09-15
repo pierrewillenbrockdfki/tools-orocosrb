@@ -102,7 +102,7 @@ when "extract"
         STDERR.puts "#{model_name} is not a known model name"
     end
 
-    Orocos.run model_name => "oroconf_extract" do
+    Orocos.run({model_name => "oroconf_extract"}) do
         task = Orocos::TaskContext.get "oroconf_extract"
         dump_configuration(task, save_configuration)
     end
