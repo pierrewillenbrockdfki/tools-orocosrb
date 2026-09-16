@@ -526,10 +526,10 @@ module Orocos
         #
         #   Orocos.run 'xsens_imu::Task' => ['imu1', 'imu2']
         #
-        def self.partition_run_options(*names, loader: Orocos.default_loader)
-            mapped_names = Hash.new
+        def self.partition_run_options(*names, loader: Orocos.default_loader, **kwargs)
+            mapped_names = kwargs
             if names.last.kind_of?(Hash)
-                mapped_names = names.pop
+                mapped_names = names.pop.merge mapped_names
             end
 
             deployments, models = Hash.new, Hash.new
@@ -641,8 +641,8 @@ module Orocos
                                    log_level: nil,
                                    output: nil, oro_logfile:  "orocos.%m-%p.txt",
                                    working_directory: Orocos.default_working_directory,
-                                   cmdline_args: Hash.new)
-            deployments, models = partition_run_options(*names, loader: loader)
+                                   cmdline_args: Hash.new, **kwargs)
+            deployments, models = partition_run_options(*names, loader: loader, **kwargs)
             wait = normalize_wait_option(wait, valgrind, gdb)
 
             all_deployments = deployments.keys.map(&:name) + models.values.flatten
